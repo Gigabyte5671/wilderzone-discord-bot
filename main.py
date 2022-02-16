@@ -26,7 +26,7 @@ community_links = [
 ]
 
 urls = {'steam': 'https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=17080',
-		'community': 'http://ta.kfk4ever.com:9080/status'}
+		'community': 'http://ta.kfk4ever.com:9080/detailed_status'}
 
 responses = {'steam': '',
 			 'community': ''}
@@ -68,9 +68,15 @@ async def links(ctx):
 async def online(ctx):
 	getOnlinePlayers()
 	steam = responses['steam']['response']['player_count']
-	community = responses['community']['online_players']
+	community = responses['community']['online_players_list']
+	if 'taserverbot' in community:
+		community.remove('taserverbot')
+	community = len(community)
 	total = steam + community
-	message = "There are currently `" + str(total) + "` players online.\n"
+	if total == 1:
+		message = "There is currently `" + str(total) + "` player online.\n"
+	else:
+		message = "There are currently `" + str(total) + "` players online.\n"
 	message += " • HiRez Servers: `" + str(steam) + "`\n"
 	message += " • Community Servers: `" + str(community) + "`"
 	await ctx.send(message)
