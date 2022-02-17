@@ -28,6 +28,7 @@ async def online(ctx):
 	community = len(community)
 
 	await ctx.guild.me.edit(nick="Community: " + str(community))
+	print('Refreshed.')
 
 
 @tasks.loop(minutes=5)
@@ -41,6 +42,7 @@ async def getOnlinePlayers():
 	
 	for guild in bot.guilds:
 		await guild.me.edit(nick="Community: " + str(community))
+	print('Refreshed.')
 
 
 @bot.event

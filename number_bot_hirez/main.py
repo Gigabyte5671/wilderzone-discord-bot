@@ -24,6 +24,7 @@ async def online(ctx):
 
 	steam = response['response']['response']['player_count']
 	await ctx.guild.me.edit(nick="HiRez: " + str(steam))
+	print('Refreshed.')
 
 
 @tasks.loop(minutes=5)
@@ -34,6 +35,7 @@ async def getOnlinePlayers():
 	
 	for guild in bot.guilds:
 		await guild.me.edit(nick="HiRez: " + str(steam))
+	print('Refreshed.')
 
 
 @bot.event

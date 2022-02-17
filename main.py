@@ -47,12 +47,14 @@ async def on_message(message):
 @bot.command(pass_context=True)
 async def hello(ctx):
 	await ctx.send("[VGH] Hello! I'm the Wilderzone Servers bot :wave:")
+	print('Sent hello message.')
 
 
 #About this bot
 @bot.command(pass_context=True)
 async def introduce(ctx):
 	await ctx.send("[VGH] Hello! I'm the Wilderzone Servers bot :wave:\nI can tell you how many people are playing Tribes Ascend at any time!\nJust say `?online` in any channel and I'll reply. :tada:")
+	print('Sent introduction message.')
 
 
 #Links
@@ -64,6 +66,7 @@ async def links(ctx):
 	
 	embed = discord.Embed(title="Useful community links:", description=message, colour=0x6DACC8)
 	await ctx.send(content=None, embed=embed)
+	print('Sent links message.')
 
 
 #List online players
@@ -83,6 +86,7 @@ async def online(ctx):
 	message += " • HiRez Servers: `" + str(steam) + "`\n"
 	message += " • Community Servers: `" + str(community) + "`"
 	await ctx.send(message)
+	print('Sent online message.')
 
 
 
