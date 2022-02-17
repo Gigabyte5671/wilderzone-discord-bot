@@ -1,4 +1,5 @@
 from discord.ext import commands
+import discord
 from urllib.request import urlopen
 import json
 import os
@@ -57,10 +58,12 @@ async def introduce(ctx):
 #Links
 @bot.command(pass_context=True)
 async def links(ctx):
-	message = "**Here are some useful community links:** \n"
+	message = ""
 	for link in community_links:
 		message += " • " + link['short_title'] + ": " + link['url'] + "\n"
-	await ctx.send(message)
+	
+	embed = discord.Embed(title="Useful community links:", description=message, colour=0x6DACC8)
+	await ctx.send(content=None, embed=embed)
 
 
 #List online players
