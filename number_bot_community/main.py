@@ -10,6 +10,9 @@ bot = commands.Bot(command_prefix='?') #define command decorator
 url = 'http://ta.kfk4ever.com:9080/detailed_status'
 
 response = {'response': ''}
+previous = {'prev': None}
+
+number_of_refreshes = {'num': 0}
 
 
 @bot.event
@@ -27,8 +30,14 @@ async def online(ctx):
 		community.remove('taserverbot')
 	community = len(community)
 
-	await ctx.guild.me.edit(nick="Community: " + str(community))
-	print('Refreshed.')
+	if community != previous['prev']:
+		await ctx.guild.me.edit(nick="Community: " + str(community))
+
+	number_of_refreshes['num'] += 1
+	ordinal = " times."
+	if(number_of_refreshes['num'] == 1):
+		ordinal = " time."
+	print('Refreshed ' + str(number_of_refreshes['num']) + ordinal, end = "\r")
 
 
 @tasks.loop(minutes=5)
@@ -39,10 +48,16 @@ async def getOnlinePlayers():
 	if 'taserverbot' in community:
 		community.remove('taserverbot')
 	community = len(community)
+
+	if community != previous['prev']:
+		for guild in bot.guilds:
+			await guild.me.edit(nick="Community: " + str(community))
 	
-	for guild in bot.guilds:
-		await guild.me.edit(nick="Community: " + str(community))
-	print('Refreshed.')
+	number_of_refreshes['num'] += 1
+	ordinal = " times."
+	if(number_of_refreshes['num'] == 1):
+		ordinal = " time."
+	print('Refreshed ' + str(number_of_refreshes['num']) + ordinal, end = "\r")
 
 
 @bot.event
