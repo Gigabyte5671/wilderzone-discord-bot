@@ -89,6 +89,25 @@ async def online(ctx):
 	print('Sent online message.')
 
 
+#List offline players
+@bot.command(pass_context=True)
+async def offline(ctx):
+	getOnlinePlayers()
+	steam = responses['steam']['response']['player_count']
+	community = responses['community']['online_players_list']
+	if 'taserverbot' in community:
+		community.remove('taserverbot')
+	community = len(community)
+	total = steam + community
+	offline_players = 547974 - total
+	if offline_players == 1:
+		message = "There is currently `" + str(offline_players) + "` player offline... VGS"
+	else:
+		message = "There are currently `" + str(offline_players) + "` players offline... VGS"
+	await ctx.send(message)
+	print('Sent offline message.')
+
+
 
 
 @bot.event
