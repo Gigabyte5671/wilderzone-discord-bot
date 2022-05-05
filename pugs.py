@@ -7,7 +7,7 @@ load_dotenv()
 
 bot = commands.Bot(command_prefix='?') #define command decorator
 
-url = 'http://ta.kfk4ever.com:9080/detailed_status'
+url = 'http://tribes-wkume.centralus.cloudapp.azure.com:9080/detailed_status'
 
 response = {'response': ''}
 previous = {'prev': None}
@@ -31,7 +31,8 @@ async def online(ctx):
 	community = len(community)
 
 	if community != previous['prev']:
-		await ctx.guild.me.edit(nick="Community: " + str(community))
+		await ctx.guild.me.edit(nick="PUGs: " + str(community))
+		previous['prev'] = community
 
 	number_of_refreshes['num'] += 1
 	ordinal = " times."
@@ -51,7 +52,8 @@ async def getOnlinePlayers():
 
 	if community != previous['prev']:
 		for guild in bot.guilds:
-			await guild.me.edit(nick="Community: " + str(community))
+			await guild.me.edit(nick="PUGs: " + str(community))
+		previous['prev'] = community
 	
 	number_of_refreshes['num'] += 1
 	ordinal = " times."
@@ -66,4 +68,4 @@ async def on_ready():
 	getOnlinePlayers.start()
 
 
-bot.run(os.getenv('TOKEN'))
+bot.run(os.getenv('PUGS_TOKEN'))

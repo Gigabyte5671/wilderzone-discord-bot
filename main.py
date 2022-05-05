@@ -3,6 +3,7 @@ import discord
 from urllib.request import urlopen
 import json
 import os
+import time
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -32,10 +33,20 @@ urls = {'steam': 'https://api.steampowered.com/ISteamUserStats/GetNumberOfCurren
 responses = {'steam': '',
 			 'community': ''}
 
-def getOnlinePlayers():
+history_data = {'content': {}}
+
+async def getOnlinePlayers():
 	responses['steam'] = json.loads(urlopen(urls['steam']).read())
 	responses['community'] = json.loads(urlopen(urls['community']).read())
 
+async def readLocalFile():
+	with open('history.json') as json_file:
+		history_data['content'] = json.load(json_file)
+
+async def saveToLocalFile():
+	with open('history.json', 'w', encoding='utf-8') as f:
+		output = json.dumps(history_data['content'])
+		f.write(output)
 
 
 @bot.event
@@ -72,7 +83,7 @@ async def links(ctx):
 #List online players
 @bot.command(pass_context=True)
 async def online(ctx):
-	getOnlinePlayers()
+	await getOnlinePlayers()
 	steam = responses['steam']['response']['player_count']
 	community = responses['community']['online_players_list']
 	if 'taserverbot' in community:
@@ -87,12 +98,16 @@ async def online(ctx):
 	message += " • Community Servers: `" + str(community) + "`"
 	await ctx.send(message)
 	print('Sent online message.')
+	new_key = time.time()
+	history_data['content'][new_key] = responses
+	await saveToLocalFile()
+	print('Logged data.')
 
 
 #List offline players
 @bot.command(pass_context=True)
 async def offline(ctx):
-	getOnlinePlayers()
+	await getOnlinePlayers()
 	steam = responses['steam']['response']['player_count']
 	community = responses['community']['online_players_list']
 	if 'taserverbot' in community:
@@ -115,4 +130,4 @@ async def on_ready():
 	print('We have logged in as {0.user}'.format(bot))
 
 
-bot.run(os.getenv('TOKEN'))
+bot.run(os.getenv('MAIN_TOKEN'))

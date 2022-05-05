@@ -7,7 +7,7 @@ load_dotenv()
 
 bot = commands.Bot(command_prefix='?') #define command decorator
 
-url = 'https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=17080'
+url = 'http://ta.kfk4ever.com:9080/detailed_status'
 
 response = {'response': ''}
 previous = {'prev': None}
@@ -25,10 +25,14 @@ async def on_message(message):
 async def online(ctx):
 	response['response'] = json.loads(urlopen(url).read())
 
-	if response['response']['response']['player_count'] != previous['prev']:
-		steam = response['response']['response']['player_count']
-		await ctx.guild.me.edit(nick="HiRez: " + str(steam))
-	
+	community = response['response']['online_players_list']
+	if 'taserverbot' in community:
+		community.remove('taserverbot')
+	community = len(community)
+
+	if community != previous['prev']:
+		await ctx.guild.me.edit(nick="Community: " + str(community))
+
 	number_of_refreshes['num'] += 1
 	ordinal = " times."
 	if(number_of_refreshes['num'] == 1):
@@ -40,10 +44,14 @@ async def online(ctx):
 async def getOnlinePlayers():
 	response['response'] = json.loads(urlopen(url).read())
 
-	if response['response']['response']['player_count'] != previous['prev']:
-		steam = response['response']['response']['player_count']
+	community = response['response']['online_players_list']
+	if 'taserverbot' in community:
+		community.remove('taserverbot')
+	community = len(community)
+
+	if community != previous['prev']:
 		for guild in bot.guilds:
-			await guild.me.edit(nick="HiRez: " + str(steam))
+			await guild.me.edit(nick="Community: " + str(community))
 	
 	number_of_refreshes['num'] += 1
 	ordinal = " times."
@@ -58,4 +66,4 @@ async def on_ready():
 	getOnlinePlayers.start()
 
 
-bot.run(os.getenv('TOKEN'))
+bot.run(os.getenv('COMMUNITY_TOKEN'))
