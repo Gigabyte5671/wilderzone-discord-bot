@@ -1,20 +1,20 @@
-from discord.ext import commands
-import discord
-from urllib.request import urlopen
+from collections import namedtuple
+import datetime
 import json
+import logging
 import os
+import shutil
 import time
+
+import discord
+from discord.ext import commands
 from dotenv import load_dotenv
-load_dotenv()
+import requests
 
-bot = commands.Bot(command_prefix='?') #define command decorator
-
-userCommands = ['help', 'hello', 'about', 'links', 'online']
-
-community_links = [
+COMMUNITY_LINKS = [
 	{'title': 'Wilderzone Live', 'short_title': 'Wilderzone', 'url': 'https://wilderzone.live/'},
 	{'title': 'Wilderzone Servers', 'short_title': 'Wilderzone Servers', 'url': 'https://servers.wilderzone.live/'},
-	{'title': 'Llamagrab Servers', 'short_title': 'Llamagrab Servers', 'url': 'https://servers.llamagrab.net/'},
+	{'title': 'Llamagrab Servers', 'short_title': 'Llamagrab Servers', 'url': 'https://llamagrab.net/'},
 	{'title': 'Tribes Launcher Sharp', 'short_title': 'Launcher', 'url': 'https://github.com/mcoot/TribesLauncherSharp/releases/latest'},
 	{'title': 'TAMods', 'short_title': 'TAMods', 'url': 'https://www.tamods.org/'},
 	{'title': 'TAAGC', 'short_title': 'TAAGC', 'url': 'https://taagc.org/'},
@@ -27,26 +27,54 @@ community_links = [
 	{'title': 'Tribes Universe', 'short_title': 'Tribes Universe', 'url': 'https://www.tribesuniverse.com/'}
 ]
 
-urls = {'steam': 'https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=17080',
-		'community': 'http://ta.kfk4ever.com:9080/detailed_status'}
+URLS = {
+	'steam': 'https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=17080',
+	'community': 'http://ta.kfk4ever.com:9080/detailed_status'
+}
 
-responses = {'steam': '',
-			 'community': ''}
+HISTORY_FILE = 'history.json'
 
-history_data = {'content': {}}
+PlayerCounts = namedtuple('PlayerCounts', 'steam, community, total')
 
-async def getOnlinePlayers():
-	responses['steam'] = json.loads(urlopen(urls['steam']).read())
-	responses['community'] = json.loads(urlopen(urls['community']).read())
+bot = commands.Bot(command_prefix='?') # define command decorator
 
-async def readLocalFile():
-	with open('history.json') as json_file:
-		history_data['content'] = json.load(json_file)
+last_online_message = None
 
-async def saveToLocalFile():
-	with open('history.json', 'w', encoding='utf-8') as f:
-		output = json.dumps(history_data['content'])
-		f.write(output)
+def get_player_counts() -> PlayerCounts:
+	# fetch data from APIs
+	responses = {
+		'steam': requests.get(URLS['steam']).json(),
+		'community': requests.get(URLS['community']).json()
+	}
+
+	# save API responses to history file
+	add_responses_to_history(responses)
+
+	# get the counts from the responses
+	steam_count = responses['steam']['response']['player_count']
+	community_count = len(responses['community']['online_players_list'])
+	if 'taserverbot' in responses['community']['online_players_list']:
+		community_count -= 1
+
+	return PlayerCounts(
+		steam=steam_count,
+		community=community_count,
+		total=steam_count + community_count
+	)
+
+
+def add_responses_to_history(responses: dict):
+	# start with empty history if it does not exists
+	if not os.path.exists(HISTORY_FILE):
+		history = {}
+	else:
+		with open(HISTORY_FILE, 'r') as f:
+			history = json.load(f)
+
+	# key is the epoch time in seconds
+	history[int(time.time())] = responses
+	with open(HISTORY_FILE, 'w') as f:
+		json.dump(history, f, indent=2)
 
 
 @bot.event
@@ -57,77 +85,103 @@ async def on_message(message):
 #Say Hello
 @bot.command(pass_context=True)
 async def hello(ctx):
+	logging.info('Sending hello message.')
 	await ctx.send("[VGH] Hello! I'm the Wilderzone Servers bot :wave:")
-	print('Sent hello message.')
 
 
 #About this bot
 @bot.command(pass_context=True)
 async def introduce(ctx):
-	await ctx.send("[VGH] Hello! I'm the Wilderzone Servers bot :wave:\nI can tell you how many people are playing Tribes Ascend at any time!\nJust say `?online` in any channel and I'll reply. :tada:")
-	print('Sent introduction message.')
+	logging.info('Sending introduction message.')
+	await ctx.send(
+		"[VGH] Hello! I'm the Wilderzone Servers bot :wave:\n"
+		+ "I can tell you how many people are playing Tribes Ascend at any time!\n"
+		+ "Just say `?online` in any channel and I'll reply. :tada:"
+	)
 
 
 #Links
 @bot.command(pass_context=True)
 async def links(ctx):
 	message = ""
-	for link in community_links:
-		message += " • " + link['short_title'] + ": " + link['url'] + "\n"
-	
-	embed = discord.Embed(title="Useful community links:", description=message, colour=0x6DACC8)
+	for link in COMMUNITY_LINKS:
+		message += f'• {link["short_title"]}: {link["url"]}\n'
+
+	embed = discord.Embed(title='Useful community links:', description=message, colour=0x6DACC8)
+	logging.info('Sending links message.')
 	await ctx.send(content=None, embed=embed)
-	print('Sent links message.')
+
+async def try_delete(message):
+	try:
+		await message.delete()
+	except Exception as e:
+		logging.error(f'Failed to delete {message.id}')
+
+async def cleanup_online_messages(ctx, sent_message):
+	global last_online_message
+	logging.info(f'deleting trigger message {ctx.message.id}')
+	await try_delete(ctx.message)
+	if last_online_message:
+		logging.info(f'deleting last online/offline message {last_online_message.id}')
+		await try_delete(last_online_message)
+	last_online_message = sent_message
 
 
 #List online players
 @bot.command(pass_context=True)
 async def online(ctx):
-	await getOnlinePlayers()
-	steam = responses['steam']['response']['player_count']
-	community = responses['community']['online_players_list']
-	if 'taserverbot' in community:
-		community.remove('taserverbot')
-	community = len(community)
-	total = steam + community
-	if total == 1:
-		message = "There is currently `" + str(total) + "` player online.\n"
+	counts = get_player_counts()
+	if counts.total == 1:
+		message = f'There is currently {counts.total} player online.\n'
 	else:
-		message = "There are currently `" + str(total) + "` players online.\n"
-	message += " • HiRez Servers: `" + str(steam) + "`\n"
-	message += " • Community Servers: `" + str(community) + "`"
-	await ctx.send(message)
-	print('Sent online message.')
-	new_key = time.time()
-	history_data['content'][new_key] = responses
-	await saveToLocalFile()
-	print('Logged data.')
+		message = f'There are currently {counts.total} players online.\n'
+	message += f' • HiRez Servers: `{counts.steam}`\n'
+	message += f' • Community Servers: `{counts.community}`'
+
+	logging.info(f'Sending online message: {message}')
+	sent_message = await ctx.send(message)
+	await cleanup_online_messages(ctx, sent_message)
 
 
 #List offline players
 @bot.command(pass_context=True)
 async def offline(ctx):
-	await getOnlinePlayers()
-	steam = responses['steam']['response']['player_count']
-	community = responses['community']['online_players_list']
-	if 'taserverbot' in community:
-		community.remove('taserverbot')
-	community = len(community)
-	total = steam + community
-	offline_players = 547974 - total
+	counts = get_player_counts()
+	offline_players = 547974 - counts.total
 	if offline_players == 1:
-		message = "There is currently `" + str(offline_players) + "` player offline... VGS"
+		message = f'There is currently {offline_players} player offline... VGS'
 	else:
-		message = "There are currently `" + str(offline_players) + "` players offline... VGS"
-	await ctx.send(message)
-	print('Sent offline message.')
+		message = f'There are currently {offline_players} players offline... VGS'
 
-
+	logging.info(f'Sending offline message: {message}')
+	sent_message = await ctx.send(message)
+	await cleanup_online_messages(ctx, sent_message)
 
 
 @bot.event
 async def on_ready():
-	print('We have logged in as {0.user}'.format(bot))
+	logging.info(f'We have logged in as {bot.user}')
+
+def main():
+	logging.basicConfig(
+		force=True,
+		level=logging.DEBUG,
+		format='%(asctime)s :: %(levelname)s :: %(name)s :: %(message)s'
+	)
+	logging.getLogger('discord').setLevel(logging.ERROR)
+	logging.getLogger('asyncio').setLevel(logging.ERROR)
+	logging.getLogger('urllib3').setLevel(logging.ERROR)
+
+	# load .env to read discord token
+	load_dotenv()
+
+	# backup history file
+	if os.path.exists(HISTORY_FILE):
+		now_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+		shutil.copy(HISTORY_FILE, f'history_{now_str}.json.bak')
+
+	bot.run(os.getenv('MAIN_TOKEN'))
 
 
-bot.run(os.getenv('MAIN_TOKEN'))
+if __name__ == '__main__':
+	main()
