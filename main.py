@@ -8,9 +8,8 @@ import shutil
 import time
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from dotenv import load_dotenv
-import requests
 
 from player_counts import steam_counter, community_counter
 
@@ -33,12 +32,16 @@ COMMUNITY_LINKS = [
 MIN_CHANGE_TO_UPDATE = 2
 
 class NameCountsBot:
+	""" A discord bot which updates its name to show player counts for a Tribes environment (steam/community)"""
 	def __init__(self, name, url, url_type, token):
 		self.name = name
 		self.url = url
 		self.token = token
+		self.logger = logging.getLogger(name)
 		self.last_count = None
 		self.guild = None
+		self.ready = False
+
 
 		if url_type == 'community':
 			self.fetcher = community_counter(url)
@@ -53,15 +56,26 @@ class NameCountsBot:
 			# fetch_guilds does not return guild.me, we have call get_guild with the id
 			shallow_guild = await self.client.fetch_guilds().next()
 			self.guild = self.client.get_guild(shallow_guild.id)
-			logging.info(f'Logged in {name} as {self.client.user} on {self.guild}')
+			self.logger.info(f'Logged in {name} as {self.client.user} on {self.guild}')
+			self.ready = True
 
 	def start(self):
+		""" Starts the bot. This should only be called once."""
 		return self.client.start(self.token)
 
 	async def get_counts(self):
+		""" Returns updated player counts. If the count changed, the bot updates it nickname in
+			discord.
+		"""
 		count = self.fetcher()
-		if not self.last_count or abs(count - self.last_count) > MIN_CHANGE_TO_UPDATE:
-			logging.info(f'Count changed {self.last_count} -> {count}, updating nickname for {self.name}')
+
+		# We only update the name if one of the following is true:
+		# - this is the first run of the bot
+		# - the player counts was 0 or the new player count is 0
+		# - The player counts changed by more than MIN_CHANGE_TO_UPDATE (to avoid spamming changes)
+		is_zero = self.last_count == 0 or count == 0
+		if self.last_count is None or is_zero or abs(count - self.last_count) > MIN_CHANGE_TO_UPDATE:
+			self.logger.info(f'Count changed ({self.last_count} -> {count}), updating nickname for {self.name}')
 			await self.guild.me.edit(nick=f'{self.name}: {count}')
 		return count
 
@@ -154,7 +168,7 @@ async def online(ctx):
 	message += f' • HiRez Servers: `{counts["HiRez"]}`\n'
 	message += f' • Community Servers: `{counts["Community"]}`'
 
-	logging.info(f'Sending online message: {message}')
+	logging.info(f'Sending online message: \n{message}')
 	sent_message = await ctx.send(message)
 	await cleanup_online_messages(ctx, sent_message)
 
@@ -162,21 +176,32 @@ async def online(ctx):
 #List offline players
 @bot.command(pass_context=True)
 async def offline(ctx):
-	counts = get_player_counts()
+	counts = await get_player_counts()
 	offline_players = 547974 - counts['total']
 	if offline_players == 1:
 		message = f'There is currently {offline_players} player offline... VGS'
 	else:
 		message = f'There are currently {offline_players} players offline... VGS'
 
-	logging.info(f'Sending offline message: {message}')
+	logging.info(f'Sending offline message: \n{message}')
 	sent_message = await ctx.send(message)
 	await cleanup_online_messages(ctx, sent_message)
+
+
+@tasks.loop(minutes=5)
+async def periodic_update():
+	await get_player_counts()
 
 
 @bot.event
 async def on_ready():
 	logging.info(f'Main bot logged in as {bot.user}')
+	# wait for the name-bots to finish fetching their guild information
+	while False in map(lambda b: b.ready, name_bots):
+		logging.info('Main bot waiting for all bots to be ready...')
+		await asyncio.sleep(2)
+	periodic_update.start()
+
 
 
 def main():
@@ -215,14 +240,16 @@ def main():
 
 	# backup history file
 	if os.path.exists(HISTORY_FILE):
+		os.makedirs('history_backup', exist_ok=True)
 		now_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-		shutil.copy(HISTORY_FILE, f'history_{now_str}.json.bak')
+		shutil.copy(HISTORY_FILE, os.path.join('history_backup', f'history_{now_str}.json'))
 
 	loop = asyncio.get_event_loop()
-	loop.create_task(bot.start(os.getenv('MAIN_TOKEN')))
 	for name_bot in name_bots:
 		loop.create_task(name_bot.start())
+	loop.create_task(bot.start(os.getenv('MAIN_TOKEN')))
 	loop.run_forever()
+
 
 
 if __name__ == '__main__':
