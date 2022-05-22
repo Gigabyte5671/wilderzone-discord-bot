@@ -77,6 +77,7 @@ class NameCountsBot:
 		if self.last_count is None or is_zero or abs(count - self.last_count) > MIN_CHANGE_TO_UPDATE:
 			self.logger.info(f'Count changed ({self.last_count} -> {count}), updating nickname for {self.name}')
 			await self.guild.me.edit(nick=f'{self.name}: {count}')
+		self.last_count = count
 		return count
 
 
