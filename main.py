@@ -42,7 +42,6 @@ class NameCountsBot:
 		self.guild = None
 		self.ready = False
 
-
 		if url_type == 'community':
 			self.fetcher = community_counter(url)
 		elif url_type == 'steam':
@@ -67,7 +66,11 @@ class NameCountsBot:
 		""" Returns updated player counts. If the count changed, the bot updates it nickname in
 			discord.
 		"""
-		count = self.fetcher()
+		try:
+			count = self.fetcher()
+		except Exception as e:
+			self.logger.error(e)
+			return None
 
 		# We only update the name if one of the following is true:
 		# - this is the first run of the bot
@@ -94,7 +97,7 @@ async def get_player_counts():
 		name_bot.name: await name_bot.get_counts()
 		for name_bot in name_bots
 	}
-	counts['total'] = sum(counts.values())
+	counts['total'] = sum(filter(None, counts.values()))
 	add_counts_to_history(counts)
 	return counts
 
@@ -166,8 +169,11 @@ async def online(ctx):
 		message = f'There is currently {counts["total"]} player online.\n'
 	else:
 		message = f'There are currently {counts["total"]} players online.\n'
-	message += f' • HiRez Servers: `{counts["HiRez"]}`\n'
-	message += f' • Community Servers: `{counts["Community"]}`'
+
+	hirez_count = counts['HiRez'] if counts.get('HiRez') else 'unavailable'
+	community_count = counts['Community'] if counts.get('Community') else 'unavailable'
+	message += f' • HiRez Servers: `{hirez_count}`\n'
+	message += f' • Community Servers: `{community_count}`'
 
 	logging.info(f'Sending online message: \n{message}')
 	sent_message = await ctx.send(message)
@@ -202,7 +208,6 @@ async def on_ready():
 		logging.info('Main bot waiting for all bots to be ready...')
 		await asyncio.sleep(2)
 	periodic_update.start()
-
 
 
 def main():
@@ -250,7 +255,6 @@ def main():
 		loop.create_task(name_bot.start())
 	loop.create_task(bot.start(os.getenv('MAIN_TOKEN')))
 	loop.run_forever()
-
 
 
 if __name__ == '__main__':
