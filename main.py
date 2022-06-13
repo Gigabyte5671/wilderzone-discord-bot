@@ -170,8 +170,8 @@ async def online(ctx):
 	else:
 		message = f'There are currently {counts["total"]} players online.\n'
 
-	hirez_count = counts['HiRez'] if counts.get('HiRez') else 'unavailable'
-	community_count = counts['Community'] if counts.get('Community') else 'unavailable'
+	hirez_count = counts['HiRez'] if counts.get('HiRez') is not None else 'unavailable'
+	community_count = counts['Community'] if counts.get('Community') is not None else 'unavailable'
 	message += f' • HiRez Servers: `{hirez_count}`\n'
 	message += f' • Community Servers: `{community_count}`'
 
