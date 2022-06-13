@@ -1,3 +1,4 @@
+import asyncio
 from collections import namedtuple
 import datetime
 import json
@@ -7,9 +8,10 @@ import shutil
 import time
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from dotenv import load_dotenv
-import requests
+
+from player_counts import steam_counter, community_counter
 
 COMMUNITY_LINKS = [
 	{'title': 'Wilderzone Live', 'short_title': 'Wilderzone', 'url': 'https://wilderzone.live/'},
@@ -27,43 +29,80 @@ COMMUNITY_LINKS = [
 	{'title': 'Tribes Universe', 'short_title': 'Tribes Universe', 'url': 'https://www.tribesuniverse.com/'}
 ]
 
-URLS = {
-	'steam': 'https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=17080',
-	'community': 'http://ta.kfk4ever.com:9080/detailed_status'
-}
+MIN_CHANGE_TO_UPDATE = 2
+
+class NameCountsBot:
+	""" A discord bot which updates its name to show player counts for a Tribes environment (steam/community)"""
+	def __init__(self, name, url, url_type, token):
+		self.name = name
+		self.url = url
+		self.token = token
+		self.logger = logging.getLogger(name)
+		self.last_count = None
+		self.guild = None
+		self.ready = False
+
+		if url_type == 'community':
+			self.fetcher = community_counter(url)
+		elif url_type == 'steam':
+			self.fetcher = steam_counter(url)
+		else:
+			raise Exception(f'url_type should be steam or community. {url_type} is not valid.')
+
+		self.client = discord.Client()
+		@self.client.event
+		async def on_ready():
+			# fetch_guilds does not return guild.me, we have call get_guild with the id
+			shallow_guild = await self.client.fetch_guilds().next()
+			self.guild = self.client.get_guild(shallow_guild.id)
+			self.logger.info(f'Logged in {name} as {self.client.user} on {self.guild}')
+			self.ready = True
+
+	def start(self):
+		""" Starts the bot. This should only be called once."""
+		return self.client.start(self.token)
+
+	async def get_counts(self):
+		""" Returns updated player counts. If the count changed, the bot updates it nickname in
+			discord.
+		"""
+		try:
+			count = self.fetcher()
+		except Exception as e:
+			self.logger.error(e)
+			return None
+
+		# We only update the name if one of the following is true:
+		# - this is the first run of the bot
+		# - the player counts was 0 or the new player count is 0
+		# - The player counts changed by more than MIN_CHANGE_TO_UPDATE (to avoid spamming changes)
+		is_zero = self.last_count == 0 or count == 0
+		if self.last_count is None or is_zero or abs(count - self.last_count) > MIN_CHANGE_TO_UPDATE:
+			self.logger.info(f'Count changed ({self.last_count} -> {count}), updating nickname for {self.name}')
+			await self.guild.me.edit(nick=f'{self.name}: {count}')
+		self.last_count = count
+		return count
+
 
 HISTORY_FILE = 'history.json'
 
-PlayerCounts = namedtuple('PlayerCounts', 'steam, community, total')
-
 bot = commands.Bot(command_prefix='?') # define command decorator
+name_bots = []
 
 last_online_message = None
 
-def get_player_counts() -> PlayerCounts:
-	# fetch data from APIs
-	responses = {
-		'steam': requests.get(URLS['steam']).json(),
-		'community': requests.get(URLS['community']).json()
+
+async def get_player_counts():
+	counts = {
+		name_bot.name: await name_bot.get_counts()
+		for name_bot in name_bots
 	}
-
-	# save API responses to history file
-	add_responses_to_history(responses)
-
-	# get the counts from the responses
-	steam_count = responses['steam']['response']['player_count']
-	community_count = len(responses['community']['online_players_list'])
-	if 'taserverbot' in responses['community']['online_players_list']:
-		community_count -= 1
-
-	return PlayerCounts(
-		steam=steam_count,
-		community=community_count,
-		total=steam_count + community_count
-	)
+	counts['total'] = sum(filter(None, counts.values()))
+	add_counts_to_history(counts)
+	return counts
 
 
-def add_responses_to_history(responses: dict):
+def add_counts_to_history(responses: dict):
 	# start with empty history if it does not exists
 	if not os.path.exists(HISTORY_FILE):
 		history = {}
@@ -80,13 +119,6 @@ def add_responses_to_history(responses: dict):
 @bot.event
 async def on_message(message):
 	await bot.process_commands(message)
-
-
-#Say Hello
-@bot.command(pass_context=True)
-async def hello(ctx):
-	logging.info('Sending hello message.')
-	await ctx.send("[VGH] Hello! I'm the Wilderzone Servers bot :wave:")
 
 
 #About this bot
@@ -111,11 +143,13 @@ async def links(ctx):
 	logging.info('Sending links message.')
 	await ctx.send(content=None, embed=embed)
 
+
 async def try_delete(message):
 	try:
 		await message.delete()
 	except Exception as e:
 		logging.error(f'Failed to delete {message.id}')
+
 
 async def cleanup_online_messages(ctx, sent_message):
 	global last_online_message
@@ -130,15 +164,18 @@ async def cleanup_online_messages(ctx, sent_message):
 #List online players
 @bot.command(pass_context=True)
 async def online(ctx):
-	counts = get_player_counts()
-	if counts.total == 1:
-		message = f'There is currently {counts.total} player online.\n'
+	counts = await get_player_counts()
+	if counts['total'] == 1:
+		message = f'There is currently {counts["total"]} player online.\n'
 	else:
-		message = f'There are currently {counts.total} players online.\n'
-	message += f' • HiRez Servers: `{counts.steam}`\n'
-	message += f' • Community Servers: `{counts.community}`'
+		message = f'There are currently {counts["total"]} players online.\n'
 
-	logging.info(f'Sending online message: {message}')
+	hirez_count = counts['HiRez'] if counts.get('HiRez') is not None else 'unavailable'
+	community_count = counts['Community'] if counts.get('Community') is not None else 'unavailable'
+	message += f' • HiRez Servers: `{hirez_count}`\n'
+	message += f' • Community Servers: `{community_count}`'
+
+	logging.info(f'Sending online message: \n{message}')
 	sent_message = await ctx.send(message)
 	await cleanup_online_messages(ctx, sent_message)
 
@@ -146,21 +183,32 @@ async def online(ctx):
 #List offline players
 @bot.command(pass_context=True)
 async def offline(ctx):
-	counts = get_player_counts()
-	offline_players = 547974 - counts.total
+	counts = await get_player_counts()
+	offline_players = 547974 - counts['total']
 	if offline_players == 1:
 		message = f'There is currently {offline_players} player offline... VGS'
 	else:
 		message = f'There are currently {offline_players} players offline... VGS'
 
-	logging.info(f'Sending offline message: {message}')
+	logging.info(f'Sending offline message: \n{message}')
 	sent_message = await ctx.send(message)
 	await cleanup_online_messages(ctx, sent_message)
 
 
+@tasks.loop(minutes=5)
+async def periodic_update():
+	await get_player_counts()
+
+
 @bot.event
 async def on_ready():
-	logging.info(f'We have logged in as {bot.user}')
+	logging.info(f'Main bot logged in as {bot.user}')
+	# wait for the name-bots to finish fetching their guild information
+	while False in map(lambda b: b.ready, name_bots):
+		logging.info('Main bot waiting for all bots to be ready...')
+		await asyncio.sleep(2)
+	periodic_update.start()
+
 
 def main():
 	logging.basicConfig(
@@ -175,12 +223,38 @@ def main():
 	# load .env to read discord token
 	load_dotenv()
 
+	name_bots.extend([
+		NameCountsBot(
+			name='HiRez',
+			url='https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=17080',
+			url_type='steam',
+			token=os.getenv('HIREZ_TOKEN')
+		),
+		NameCountsBot(
+			name='Community',
+			url='http://ta.kfk4ever.com:9080/detailed_status',
+			url_type='community',
+			token=os.getenv('COMMUNITY_TOKEN')
+		),
+		NameCountsBot(
+			name='PUGz',
+			url='http://tribes-wkume.centralus.cloudapp.azure.com:9080/detailed_status',
+			url_type='community',
+			token=os.getenv('PUGS_TOKEN')
+		)
+	])
+
 	# backup history file
 	if os.path.exists(HISTORY_FILE):
+		os.makedirs('history_backup', exist_ok=True)
 		now_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-		shutil.copy(HISTORY_FILE, f'history_{now_str}.json.bak')
+		shutil.copy(HISTORY_FILE, os.path.join('history_backup', f'history_{now_str}.json'))
 
-	bot.run(os.getenv('MAIN_TOKEN'))
+	loop = asyncio.get_event_loop()
+	for name_bot in name_bots:
+		loop.create_task(name_bot.start())
+	loop.create_task(bot.start(os.getenv('MAIN_TOKEN')))
+	loop.run_forever()
 
 
 if __name__ == '__main__':
